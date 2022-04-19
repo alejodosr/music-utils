@@ -15,37 +15,33 @@ from detectron2.utils.visualizer import ColorMode
 import numpy as np
 import glob
 import os
+from PIL import Image
 
 
-def apply_mask(image, mask, thr_body=95):
-    mask = mask.astype(np.uint8)
+from person_changers.bansky_person_handlers import apply_mask
+from face_changers.anime_face_changer import AnimeFaceChanger
 
-    only_person = cv2.bitwise_and(image, image, mask=mask)
 
-    lab = cv2.cvtColor(only_person, cv2.COLOR_BGR2LAB)
+def alpha_blend(img1, img2, mask_thickness=(0.2, 0)):
+    h, w = img1.shape[:2]
+    blend_mask = np.zeros((h, w), np.uint8)
+    cv2.rectangle(blend_mask, (0, h - int(mask_thickness[0] * h)), (w, h), (255, 255, 255), -1, cv2.LINE_AA)
+    blend_mask = cv2.GaussianBlur(blend_mask, (21, 21), 21)
 
-    # -----Splitting the LAB image to different channels-------------------------
-    l, a, b = cv2.split(lab)
+    if blend_mask.ndim == 3 and blend_mask.shape[-1] == 3:
+        alpha = blend_mask/255.0
+    else:
+        alpha = cv2.cvtColor(blend_mask, cv2.COLOR_GRAY2BGR)/255.0
 
-    # -----Applying CLAHE to L-channel-------------------------------------------
-    clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(1, 1))
-    cl = clahe.apply(l)
-    ret, only_person = cv2.threshold(cl, thr_body, 255, cv2.THRESH_BINARY)
-
-    # Segment background
-    mask2 = 1 - mask
-    image = cv2.bitwise_and(image, image, mask=mask2)
-
-    # Convert to BGR
-    only_person = cv2.cvtColor(only_person, cv2.COLOR_GRAY2BGR)
-
-    # Join images
-    image = cv2.add(image, only_person)
-
-    return image
+    blended = cv2.convertScaleAbs(img2 * (1 - alpha) + img1 * alpha)
+    return blended
 
 # Read video
-INPUT_VIDEO = 'cambia.mov'
+INPUT_VIDEO = '/home/alejandro/fresssh/tests/encoder.mp4'
+ANIME_FACE = True
+
+if ANIME_FACE:
+    anime_face_changer = AnimeFaceChanger()
 
 #Generate democracy
 cap = cv2.VideoCapture(INPUT_VIDEO)
@@ -83,8 +79,8 @@ while cap.isOpened():
     if ret:
 
         # Add brightness
-        frame = cv2.add(frame, np.array([50.0]))
-        print("INFO: Adding brightness")
+        # frame = cv2.add(frame, np.array([50.0]))
+        # print("INFO: Adding brightness")
 
         frame_count += 1
 
@@ -97,26 +93,71 @@ while cap.isOpened():
         img_demo = frame
         for idx, pred_class in enumerate(pred_classes):
             if pred_class == 0:
-                mask = masks[idx, :, :].squeeze(0).numpy()
+                mask = masks[idx, :, :].squeeze(0).numpy().astype(np.uint8)
+                mask = mask.astype(np.uint8)
+
+                img_demo = apply_mask(img_demo, mask)
 
                 # Face detector
                 detections = detector.detect(frame[:, :, ::-1])
                 if len(detections):
                     face_bbox = [int(value) for value in detections[0]]
+                    h, w, c = frame.shape
                     xmin, ymin, xmax, ymax, conf = face_bbox
-                    print(face_bbox)
+                    padding = 900 * (xmax - xmin) / w
+                    xmin = max(0, int(xmin - padding))
+                    ymin = max(0, int(ymin - padding))
+                    xmax = min(w, int(xmax + padding))
+                    ymax = min(h, int(ymax + padding))
 
-                    # if mask[ymin:ymax, xmin:xmax].sum() < 200:  # Detected face with mask rcnn
-                    mask[ymin:ymax, xmin:xmax] = np.ones((ymax - ymin, xmax - xmin))
+                    if ANIME_FACE:
+                        in_img = frame[ymin:ymax, xmin:xmax, :]
+                        resized_in_img = cv2.resize(in_img.copy(), (512, 512), interpolation=cv2.INTER_AREA)
+                        out_img_pil = anime_face_changer.change_face(Image.fromarray(cv2.cvtColor(resized_in_img,
+                                                                      cv2.COLOR_BGR2RGB)))
 
-                img_demo = apply_mask(img_demo, mask)
+                        out_img = np.array(out_img_pil)
+                        # Convert RGB to BGR
+                        out_img = out_img[:, :, ::-1].copy()
+                        out_img = cv2.resize(out_img, (xmax - xmin, ymax - ymin), interpolation=cv2.INTER_AREA)
+
+                        face_mask = mask[ymin:ymax, xmin:xmax].copy()
+
+                        # Improve face mask due to anime distortion of original sizes
+                        modified_face_mask = face_mask.copy()
+
+                        dilation_rate = (0.2, 0.15)
+                        dilated_size = (int((ymax - ymin) * dilation_rate[0]), int((xmax - xmin) * dilation_rate[0]))
+                        face_mask_dilated = cv2.dilate(modified_face_mask.copy(),  np.ones(dilated_size), iterations=1)  # (y, x)
+                        original_rate = 0.75
+                        modified_face_mask[0:int(original_rate * ymax), 0:xmax] = face_mask_dilated[0:int(original_rate * ymax), 0:xmax]
+                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (51, 51))
+                        modified_face_mask = cv2.morphologyEx(modified_face_mask, cv2.MORPH_OPEN, kernel, iterations=5)
+
+                        face_mask = cv2.bitwise_or(face_mask, modified_face_mask)
+
+                        masked_img = cv2.bitwise_and(out_img, out_img, mask=face_mask)
+
+                        # Segment background
+                        face_mask_inverse = 1 - face_mask
+                        image_back = cv2.bitwise_and(in_img, in_img, mask=face_mask_inverse)
+
+                        final_face_img = cv2.add(masked_img, image_back)
+
+                        img_demo[ymin:ymax, xmin:xmax, :] = \
+                            alpha_blend(img_demo[ymin:ymax, xmin:xmax, :], final_face_img)
+
+                    if mask[ymin:ymax, xmin:xmax].sum() < 200:  # Detected face with mask rcnn
+                        mask[ymin:ymax, xmin:xmax] = np.ones((ymax - ymin, xmax - xmin))
+
+
 
         print('./save/' + str(frame_count).zfill(8) + '.jpg')
         cv2.imwrite('./save/' + str(frame_count).zfill(8) + '.jpg', img_demo)
 
         # cv2.namedWindow("img", cv2.WINDOW_NORMAL)        # Create window with freedom of dimensions
         # cv2.imshow('img', img_demo)
-        # cv2.waitKey(1)
+        # cv2.waitKey(0)
     else:
         # When everything done, release the video capture object
         cap.release()
