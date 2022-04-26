@@ -20,6 +20,7 @@ from PIL import Image
 
 from person_changers.bansky_person_handlers import apply_mask
 from face_changers.anime_face_changer import AnimeFaceChanger
+from face_changers.dual_stylegan_face_changer import DualStyleGan2FaceChanger
 
 
 def alpha_blend(img1, img2, mask_thickness=(0.2, 0)):
@@ -38,10 +39,12 @@ def alpha_blend(img1, img2, mask_thickness=(0.2, 0)):
 
 # Read video
 INPUT_VIDEO = '/home/alejandro/fresssh/tests/encoder.mp4'
-ANIME_FACE = True
+STYLE = 'dual'  # 'anime', 'dual'
 
-if ANIME_FACE:
-    anime_face_changer = AnimeFaceChanger()
+if STYLE == 'anime':
+    face_changer = AnimeFaceChanger()
+elif STYLE == 'dual':
+    face_changer = DualStyleGan2FaceChanger(download=False)
 
 #Generate democracy
 cap = cv2.VideoCapture(INPUT_VIDEO)
@@ -84,6 +87,9 @@ while cap.isOpened():
 
         frame_count += 1
 
+        if frame_count <= 100:
+            continue
+
         predictor = DefaultPredictor(cfg)
         outputs = predictor(frame)
 
@@ -110,10 +116,14 @@ while cap.isOpened():
                     xmax = min(w, int(xmax + padding))
                     ymax = min(h, int(ymax + padding))
 
-                    if ANIME_FACE:
+                    if STYLE is not None:
                         in_img = frame[ymin:ymax, xmin:xmax, :]
+                        cv2.namedWindow("in_img", cv2.WINDOW_NORMAL)  # Create window with freedom of dimensions
+                        cv2.imshow('in_img', in_img)
+                        cv2.waitKey(1)
                         resized_in_img = cv2.resize(in_img.copy(), (512, 512), interpolation=cv2.INTER_AREA)
-                        out_img_pil = anime_face_changer.change_face(Image.fromarray(cv2.cvtColor(resized_in_img,
+                        cv2.imwrite('/tmp/ale2.jpg', resized_in_img)
+                        out_img_pil = face_changer.change_face(Image.fromarray(cv2.cvtColor(resized_in_img,
                                                                       cv2.COLOR_BGR2RGB)))
 
                         out_img = np.array(out_img_pil)
@@ -152,12 +162,12 @@ while cap.isOpened():
 
 
 
-        print('./save/' + str(frame_count).zfill(8) + '.jpg')
-        cv2.imwrite('./save/' + str(frame_count).zfill(8) + '.jpg', img_demo)
+        # print('./save/' + str(frame_count).zfill(8) + '.jpg')
+        # cv2.imwrite('./save/' + str(frame_count).zfill(8) + '.jpg', img_demo)
 
-        # cv2.namedWindow("img", cv2.WINDOW_NORMAL)        # Create window with freedom of dimensions
-        # cv2.imshow('img', img_demo)
-        # cv2.waitKey(0)
+        cv2.namedWindow("img", cv2.WINDOW_NORMAL)        # Create window with freedom of dimensions
+        cv2.imshow('img', img_demo)
+        cv2.waitKey(0)
     else:
         # When everything done, release the video capture object
         cap.release()

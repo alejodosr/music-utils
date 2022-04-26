@@ -4,3 +4,5 @@
 *.mov
 *.pkl
 *.pth
+checkpoint
+__pycache__

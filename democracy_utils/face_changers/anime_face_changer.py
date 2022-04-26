@@ -1,5 +1,5 @@
 import torch
-
+# https://github.com/bryandlee/animegan2-pytorch
 
 class AnimeFaceChanger:
     def __init__(self):
