@@ -42,8 +42,10 @@ INPUT_VIDEO = '/home/alejandro/fresssh/tests/encoder.mp4'
 STYLE = 'dual'  # 'anime', 'dual'
 
 if STYLE == 'anime':
+    dilation_rate = (0.2, 0.15)
     face_changer = AnimeFaceChanger()
 elif STYLE == 'dual':
+    dilation_rate = (0.4, 0.4)
     face_changer = DualStyleGan2FaceChanger(download=False)
 
 #Generate democracy
@@ -87,8 +89,8 @@ while cap.isOpened():
 
         frame_count += 1
 
-        if frame_count <= 100:
-            continue
+        # if frame_count <= 150:
+        #     continue
 
         predictor = DefaultPredictor(cfg)
         outputs = predictor(frame)
@@ -118,56 +120,57 @@ while cap.isOpened():
 
                     if STYLE is not None:
                         in_img = frame[ymin:ymax, xmin:xmax, :]
-                        cv2.namedWindow("in_img", cv2.WINDOW_NORMAL)  # Create window with freedom of dimensions
-                        cv2.imshow('in_img', in_img)
-                        cv2.waitKey(1)
-                        resized_in_img = cv2.resize(in_img.copy(), (512, 512), interpolation=cv2.INTER_AREA)
-                        cv2.imwrite('/tmp/ale2.jpg', resized_in_img)
+                        # cv2.namedWindow("in_img", cv2.WINDOW_NORMAL)  # Create window with freedom of dimensions
+                        # cv2.imshow('in_img', in_img)
+                        # cv2.waitKey(1)
+                        size = (512, 512)
+                        resized_in_img = cv2.resize(in_img.copy(), size, interpolation=cv2.INTER_AREA)
                         out_img_pil = face_changer.change_face(Image.fromarray(cv2.cvtColor(resized_in_img,
                                                                       cv2.COLOR_BGR2RGB)))
 
-                        out_img = np.array(out_img_pil)
-                        # Convert RGB to BGR
-                        out_img = out_img[:, :, ::-1].copy()
-                        out_img = cv2.resize(out_img, (xmax - xmin, ymax - ymin), interpolation=cv2.INTER_AREA)
+                        if out_img_pil is not None:
+                            out_img = np.array(out_img_pil)
+                            # Convert RGB to BGR
+                            out_img = out_img[:, :, ::-1].copy()
+                            out_img = cv2.resize(out_img, (xmax - xmin, ymax - ymin), interpolation=cv2.INTER_AREA)
 
-                        face_mask = mask[ymin:ymax, xmin:xmax].copy()
+                            face_mask = mask[ymin:ymax, xmin:xmax].copy()
 
-                        # Improve face mask due to anime distortion of original sizes
-                        modified_face_mask = face_mask.copy()
+                            # Improve face mask due to anime distortion of original sizes
+                            modified_face_mask = face_mask.copy()
 
-                        dilation_rate = (0.2, 0.15)
-                        dilated_size = (int((ymax - ymin) * dilation_rate[0]), int((xmax - xmin) * dilation_rate[0]))
-                        face_mask_dilated = cv2.dilate(modified_face_mask.copy(),  np.ones(dilated_size), iterations=1)  # (y, x)
-                        original_rate = 0.75
-                        modified_face_mask[0:int(original_rate * ymax), 0:xmax] = face_mask_dilated[0:int(original_rate * ymax), 0:xmax]
-                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (51, 51))
-                        modified_face_mask = cv2.morphologyEx(modified_face_mask, cv2.MORPH_OPEN, kernel, iterations=5)
 
-                        face_mask = cv2.bitwise_or(face_mask, modified_face_mask)
+                            dilated_size = (int((ymax - ymin) * dilation_rate[0]), int((xmax - xmin) * dilation_rate[0]))
+                            face_mask_dilated = cv2.dilate(modified_face_mask.copy(),  np.ones(dilated_size), iterations=1)  # (y, x)
+                            original_rate = 0.75
+                            modified_face_mask[0:int(original_rate * ymax), 0:xmax] = face_mask_dilated[0:int(original_rate * ymax), 0:xmax]
+                            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (51, 51))
+                            modified_face_mask = cv2.morphologyEx(modified_face_mask, cv2.MORPH_OPEN, kernel, iterations=5)
 
-                        masked_img = cv2.bitwise_and(out_img, out_img, mask=face_mask)
+                            face_mask = cv2.bitwise_or(face_mask, modified_face_mask)
 
-                        # Segment background
-                        face_mask_inverse = 1 - face_mask
-                        image_back = cv2.bitwise_and(in_img, in_img, mask=face_mask_inverse)
+                            masked_img = cv2.bitwise_and(out_img, out_img, mask=face_mask)
 
-                        final_face_img = cv2.add(masked_img, image_back)
+                            # Segment background
+                            face_mask_inverse = 1 - face_mask
+                            image_back = cv2.bitwise_and(in_img, in_img, mask=face_mask_inverse)
 
-                        img_demo[ymin:ymax, xmin:xmax, :] = \
-                            alpha_blend(img_demo[ymin:ymax, xmin:xmax, :], final_face_img)
+                            final_face_img = cv2.add(masked_img, image_back)
+
+                            img_demo[ymin:ymax, xmin:xmax, :] = \
+                                alpha_blend(img_demo[ymin:ymax, xmin:xmax, :], final_face_img)
 
                     if mask[ymin:ymax, xmin:xmax].sum() < 200:  # Detected face with mask rcnn
                         mask[ymin:ymax, xmin:xmax] = np.ones((ymax - ymin, xmax - xmin))
 
 
 
-        # print('./save/' + str(frame_count).zfill(8) + '.jpg')
-        # cv2.imwrite('./save/' + str(frame_count).zfill(8) + '.jpg', img_demo)
+        print('./save/' + str(frame_count).zfill(8) + '.jpg')
+        cv2.imwrite('./save/' + str(frame_count).zfill(8) + '.jpg', img_demo)
 
-        cv2.namedWindow("img", cv2.WINDOW_NORMAL)        # Create window with freedom of dimensions
-        cv2.imshow('img', img_demo)
-        cv2.waitKey(0)
+        # cv2.namedWindow("img", cv2.WINDOW_NORMAL)        # Create window with freedom of dimensions
+        # cv2.imshow('img', img_demo)
+        # cv2.waitKey(0)
     else:
         # When everything done, release the video capture object
         cap.release()

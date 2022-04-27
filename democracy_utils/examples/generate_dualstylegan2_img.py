@@ -1,7 +1,7 @@
 import os
 
-import PIL
 import cv2
+import dlib
 import numpy as np
 import torch
 from util import save_image, load_image, visualize
@@ -15,6 +15,7 @@ from model.dualstylegan import DualStyleGAN
 from model.sampler.icp import ICPTrainer
 from model.encoder.psp import pSp
 from PIL import Image
+import PIL
 
 MODEL_DIR = 'checkpoint'
 DATA_DIR = 'data'
@@ -201,11 +202,12 @@ img = np.ascontiguousarray(((vis.squeeze(0).cpu().detach().numpy().transpose(1, 
 # img is rgb, convert to opencv's default bgr
 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
+img_original = cv2.imread(image_path)
 # display image with opencv or any operation you like
 cv2.namedWindow("result", cv2.WINDOW_NORMAL)  # Create window with freedom of dimensions
 cv2.imshow("result", img)
 cv2.namedWindow("original", cv2.WINDOW_NORMAL)  # Create window with freedom of dimensions
-cv2.imshow("original", cv2.imread(image_path))
+cv2.imshow("original", img_original)
 
 img_resize = cv2.resize(img, (crop[2] - crop[0], crop[3] - crop[1]))
 # img_resize = img.copy()
@@ -233,6 +235,49 @@ h, w, c = img_resize.shape
 #
 # im_pil = im_pil.transform((crop[2] - crop[0], crop[3] - crop[1]), PIL.Image.QUAD, (inverse_quad + 0.5).flatten(), PIL.Image.BILINEAR)
 # img_inverse_quad = cv2.cvtColor(np.array(im_pil), cv2.COLOR_RGB2BGR)
+
+img_original_resize = cv2.resize(img_original, (256, 256))
+
+
+from model.face_aligner import FaceAligner
+# initialize dlib's face detector (HOG-based) and then create
+# the facial landmark predictor and the face aligner
+detector = dlib.get_frontal_face_detector()
+predictor = dlib.shape_predictor('/home/alejandro/fresssh/py_workspace/DualStyleGAN/shape_predictor_68_face_landmarks.dat')
+fa = FaceAligner(predictor, desiredFaceWidth=256)
+
+# load the input image, resize it, and convert it to grayscale
+
+gray = cv2.cvtColor(img_original_resize, cv2.COLOR_BGR2GRAY)
+# show the original input image and detect faces in the grayscale
+# image
+rects = detector(gray, 2)
+
+faceAligned, m_affine, (w_affine_orig, h_affine_orig) = fa.align(img_original_resize, gray, rects[0])
+cv2.namedWindow("orig_aligned", cv2.WINDOW_NORMAL)  # Create window with freedom of dimensions
+cv2.imshow("orig_aligned", faceAligned)
+
+m_affine_inverse = cv2.invertAffineTransform(m_affine).copy()
+
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+# show the original input image and detect faces in the grayscale
+# image
+rects = detector(gray, 2)
+
+faceAligned, m_affine, (w_affine, h_affine) = fa.align(img, gray, rects[0])
+cv2.namedWindow("out_aligned", cv2.WINDOW_NORMAL)  # Create window with freedom of dimensions
+cv2.imshow("out_aligned", faceAligned)
+
+output_realigned = cv2.warpAffine(img, m_affine, (w_affine, h_affine),
+                        flags=cv2.INTER_CUBIC)
+output_realigned = cv2.warpAffine(output_realigned, m_affine_inverse, (w_affine, h_affine),
+                        flags=cv2.INTER_CUBIC)
+
+cv2.namedWindow("re_out_aligned", cv2.WINDOW_NORMAL)  # Create window with freedom of dimensions
+cv2.imshow("re_out_aligned", output_realigned)
+
+
+
 
 img_output = img_original.copy()
 img_output[crop[1]:crop[3], crop[0]:crop[2]] = img_resize

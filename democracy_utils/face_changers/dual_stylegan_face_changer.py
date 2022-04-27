@@ -31,7 +31,7 @@ class DualStyleGan2FaceChanger:
         assert os.path.isdir(self.DATA_DIR)
         self.if_align_face = True
         self.style_types = ['cartoon', 'caricature', 'anime', 'arcane', 'comic', 'pixar', 'slamdunk']
-        self.style_type = self.style_types[2]
+        self.style_type = self.style_types[6]
         self.style_id = 26
 
         if not os.path.exists(os.path.join(self.MODEL_DIR, self.style_type)):
@@ -148,8 +148,8 @@ class DualStyleGan2FaceChanger:
             data = zipfile.read()
             open(self.modelname, 'wb').write(data)
         predictor = dlib.shape_predictor(self.modelname)
-        aligned_image = self.align_face(rgb_face_img, predictor=predictor)
-        return aligned_image
+        aligned_image, crop, quad, transform_size = self.align_face(rgb_face_img, predictor=predictor)
+        return aligned_image, crop, quad, transform_size
 
     def get_landmark(self, rgb_img, predictor):
         """get landmark with dlib
@@ -158,7 +158,7 @@ class DualStyleGan2FaceChanger:
         detector = dlib.get_frontal_face_detector()
 
         # img = dlib.load_rgb_image(filepath)
-        img = cv2.cvtColor(numpy.array(rgb_img), cv2.COLOR_RGB2BGR)[:, :, ::-1]
+        img = numpy.array(rgb_img)[:, :, ::-1]
         dets = detector(img, 1)
 
         for k, d in enumerate(dets):
@@ -261,62 +261,112 @@ class DualStyleGan2FaceChanger:
             img = img.resize((output_size, output_size), PIL.Image.ANTIALIAS)
 
         # Save aligned image.
-        return img
+        return img, crop, quad, transform_size
+
+    def rect_to_bb(self, rect):
+        # take a bounding predicted by dlib and convert it
+        # to the format (x, y, w, h) as we would normally do
+        # with OpenCV
+        x1 = rect.left()
+        y1 = rect.top()
+        x2 = rect.right()
+        y2 = rect.bottom()
+
+        # return a tuple of (x, y, w, h)
+        return (x1, y1), (x2, y2)
 
     def change_face(self, rgb_face_img):
-        # 		img = PIL.Image.fromarray(np.uint8(np.clip(np.rint(img), 0, 255)), 'RGB')
-        if self.if_align_face:
-            I = self.transform(self.run_alignment(rgb_face_img)).unsqueeze(dim=0).to(self.device)
-        else:
-            transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-            ])
+        try:
+            # 		img = PIL.Image.fromarray(np.uint8(np.clip(np.rint(img), 0, 255)), 'RGB')
+            if self.if_align_face:
+                img, crop, quad, transform_size = self.run_alignment(rgb_face_img)
+                I= self.transform(img).unsqueeze(dim=0).to(self.device)
+            else:
+                transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+                ])
 
-            # img = PIL.Image.fromarray(rgb_face_img)
-            img = rgb_face_img
-            img = transform(img)
-            img = img.unsqueeze(dim=0)
-            I = F.adaptive_avg_pool2d(img.to(self.device), 256)
+                # img = PIL.Image.fromarray(rgb_face_img)
+                img = rgb_face_img
+                img = transform(img)
+                img = img.unsqueeze(dim=0)
+                I = F.adaptive_avg_pool2d(img.to(self.device), 256)
 
-        with torch.no_grad():
-            self.stylename = list(self.exstyles.keys())[self.style_id]
-            self.stylepath = os.path.join(self.DATA_DIR, self.style_type, 'images/train', self.stylename)
-            img_rec, instyle = self.encoder(I, randomize_noise=False, return_latents=True,
-                                       z_plus_latent=True, return_z_plus_latent=True, resize=False)
-            img_rec = torch.clamp(img_rec.detach(), -1, 1)
+            with torch.no_grad():
+                self.stylename = list(self.exstyles.keys())[self.style_id]
+                self.stylepath = os.path.join(self.DATA_DIR, self.style_type, 'images/train', self.stylename)
+                img_rec, instyle = self.encoder(I, randomize_noise=False, return_latents=True,
+                                           z_plus_latent=True, return_z_plus_latent=True, resize=False)
+                img_rec = torch.clamp(img_rec.detach(), -1, 1)
 
-            latent = torch.tensor(self.exstyles[self.stylename]).repeat(2, 1, 1).to(self.device)
-            # latent[0] for both color and structrue transfer and latent[1] for only structrue transfer
-            latent[1, 7:18] = instyle[0, 7:18]
-            exstyle = self.generator.generator.style(
-                latent.reshape(latent.shape[0] * latent.shape[1], latent.shape[2])).reshape(
-                latent.shape)
+                latent = torch.tensor(self.exstyles[self.stylename]).repeat(2, 1, 1).to(self.device)
+                # latent[0] for both color and structrue transfer and latent[1] for only structrue transfer
+                latent[1, 7:18] = instyle[0, 7:18]
+                exstyle = self.generator.generator.style(
+                    latent.reshape(latent.shape[0] * latent.shape[1], latent.shape[2])).reshape(
+                    latent.shape)
 
-            img_gen, _ = self.generator([instyle.repeat(2, 1, 1)], exstyle, z_plus_latent=True,
-                                   truncation=0.7, truncation_latent=0, use_res=True,
-                                   interp_weights=[0.6] * 7 + [1] * 11)
-            img_gen = torch.clamp(img_gen.detach(), -1, 1)
-            # deactivate color-related layers by setting w_c = 0
-            img_gen2, _ = self.generator([instyle], exstyle[0:1], z_plus_latent=True,
-                                    truncation=0.7, truncation_latent=0, use_res=True,
-                                    interp_weights=[0.6] * 7 + [0] * 11)
-            img_gen2 = torch.clamp(img_gen2.detach(), -1, 1)
+                img_gen, _ = self.generator([instyle.repeat(2, 1, 1)], exstyle, z_plus_latent=True,
+                                       truncation=0.7, truncation_latent=0, use_res=True,
+                                       interp_weights=[0.6] * 7 + [1] * 11)
+                img_gen = torch.clamp(img_gen.detach(), -1, 1)
+                # deactivate color-related layers by setting w_c = 0
+                img_gen2, _ = self.generator([instyle], exstyle[0:1], z_plus_latent=True,
+                                        truncation=0.7, truncation_latent=0, use_res=True,
+                                        interp_weights=[0.6] * 7 + [0] * 11)
+                img_gen2 = torch.clamp(img_gen2.detach(), -1, 1)
 
-        vis = torchvision.utils.make_grid(F.adaptive_avg_pool2d(torch.cat([img_rec, img_gen, img_gen2], dim=0), 256), 4,
-                                          1)
-        fig = plt.figure(figsize=(10, 10), dpi=120)
-        visualize(vis.cpu())
-        fig.canvas.draw()
+            vis = F.adaptive_avg_pool2d(img_gen2, 256)
+            img = np.ascontiguousarray(
+                ((vis.squeeze(0).cpu().detach().numpy().transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8))
 
-        # convert canvas to image
-        img = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
-        img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            # img is rgb, convert to opencv's default bgr
+            img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-        # img is rgb, convert to opencv's default bgr
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            bgr_face_img = np.array(rgb_face_img)
+            # Convert RGB to BGR
+            bgr_face_img = bgr_face_img[:, :, ::-1].copy()
 
-        cv2.imshow("plot", img)
-        cv2.waitKey(0)
+            # Align faces
+            # detector = dlib.get_frontal_face_detector()
+            # dets_orig = detector(numpy.array(rgb_face_img)[:, :, ::-1], 1)[0]
+            # dets_out = detector(numpy.array(img)[:, :, ::-1], 1)[0]
+            #
+            # rect_orig_pt1, rect_orig_pt2 = self.rect_to_bb(dets_orig)
+            # rect_out_pt1, rect_out_pt2 = self.rect_to_bb(dets_out)
+            # bgr_face_img = cv2.rectangle(bgr_face_img, rect_orig_pt1, rect_orig_pt2, (255, 0, 0), 2)
+            # img_bgr = cv2.rectangle(img_bgr, rect_out_pt1, rect_out_pt2, (255, 0, 0), 2)
 
-        return img
+            # cv2.imshow("rgb_face_img", bgr_face_img)
+            # cv2.imshow("img", img_bgr)
+            # cv2.waitKey(1)
+            #
+            # fx = (dets_orig.right() - dets_orig.left()) / (dets_out.right() - dets_out.left())
+            # fy = (dets_orig.bottom() - dets_orig.top()) / (dets_out.bottom() - dets_out.top())
+            #
+            # width = int(img.shape[1] * fx)
+            # height = int(img.shape[0] * fy)
+            #
+            # img_bgr_resized = cv2.resize(img_bgr, (width, height), interpolation=cv2.INTER_AREA)
+            #
+            # # Calculate position in resulting image
+            # position_x = dets_orig.left() - int(dets_out.left() * fx)
+            # position_y = dets_orig.top() - int(dets_out.top() * fy)
+            #
+            # crop_x = 0 if position_x >= 0 else abs(position_x)
+            # position_x = 0 if position_x < 0 else position_x
+            # crop_y = 0 if position_y >= 0 else abs(position_y)
+            # position_y = 0 if position_y < 0 else position_y
+            #
+            # bgr_face_img[position_y:position_y + img_bgr_resized.shape[0] - crop_y, position_x:position_x + img_bgr_resized.shape[1] - crop_x, :] = img_bgr_resized[crop_y:, crop_x:, :]
+            #
+            # cv2.imshow("plot", img_bgr_resized)
+            # cv2.waitKey(1)
+
+            img_bgr_resize = cv2.resize(img_bgr, (crop[2] - crop[0], crop[3] - crop[1]))
+            bgr_face_img[crop[1]:crop[3], crop[0]:crop[2]] = img_bgr_resize
+            return cv2.cvtColor(bgr_face_img, cv2.COLOR_BGR2RGB)
+        except Exception as e:
+            print(e)
+            return None
