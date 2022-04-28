@@ -22,7 +22,7 @@ from face_changers.dual_style_gan2.model.encoder.psp import pSp
 
 
 class DualStyleGan2FaceChanger:
-    def __init__(self, download=True):
+    def __init__(self, download=True, style=0):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.MODEL_DIR = 'checkpoint'
@@ -31,7 +31,7 @@ class DualStyleGan2FaceChanger:
         assert os.path.isdir(self.DATA_DIR)
         self.if_align_face = True
         self.style_types = ['cartoon', 'caricature', 'anime', 'arcane', 'comic', 'pixar', 'slamdunk']
-        self.style_type = self.style_types[6]
+        self.style_type = self.style_types[style]
         self.style_id = 26
 
         if not os.path.exists(os.path.join(self.MODEL_DIR, self.style_type)):
@@ -216,7 +216,7 @@ class DualStyleGan2FaceChanger:
 
         output_size = 256
         transform_size = 256
-        enable_padding = True
+        enable_padding = False
 
         # Shrink.
         shrink = int(np.floor(qsize / output_size * 0.5))

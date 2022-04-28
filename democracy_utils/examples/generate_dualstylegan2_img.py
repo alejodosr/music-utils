@@ -20,11 +20,11 @@ import PIL
 MODEL_DIR = 'checkpoint'
 DATA_DIR = 'data'
 # image_path = './data/content/unsplash-rDEOVtE7vOs.jpg'
-image_path = '/home/alejandro/py_workspace/music-utils/democracy_utils/face_changers/dual_style_gan2/data/ale4.jpg'
+image_path = '/home/alejandro/py_workspace/music-utils/democracy_utils/face_changers/dual_style_gan2/data/girl.jpg'
 if_align_face = True
 device = 'cuda'
 style_types = ['cartoon', 'caricature', 'anime', 'arcane', 'comic', 'pixar', 'slamdunk']
-style_type = style_types[6]
+style_type = style_types[0]
 
 img_original = cv2.imread(image_path)
 

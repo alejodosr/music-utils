@@ -1,3 +1,5 @@
+import argparse
+
 from detectron2.utils.logger import setup_logger
 setup_logger()
 
@@ -23,7 +25,7 @@ from face_changers.anime_face_changer import AnimeFaceChanger
 from face_changers.dual_stylegan_face_changer import DualStyleGan2FaceChanger
 
 
-def alpha_blend(img1, img2, mask_thickness=(0.2, 0)):
+def alpha_blend(img1, img2, mask_thickness=(0.14, 0)):
     h, w = img1.shape[:2]
     blend_mask = np.zeros((h, w), np.uint8)
     cv2.rectangle(blend_mask, (0, h - int(mask_thickness[0] * h)), (w, h), (255, 255, 255), -1, cv2.LINE_AA)
@@ -37,162 +39,29 @@ def alpha_blend(img1, img2, mask_thickness=(0.2, 0)):
     blended = cv2.convertScaleAbs(img2 * (1 - alpha) + img1 * alpha)
     return blended
 
-# Read video
-INPUT_VIDEO = '/home/alejandro/fresssh/tests/encoder.mp4'
-STYLE = 'dual'  # 'anime', 'dual'
+def dilate_face_mask(face_mask, dilation_rate):
+    dilated_size = (int((ymax - ymin) * dilation_rate[0]), int((xmax - xmin) * dilation_rate[0]))
+    face_mask_dilated = cv2.dilate(face_mask.copy(), np.ones(dilated_size), iterations=1)  # (y, x)
+    original_rate = 0.75
+    face_mask[0:int(original_rate * ymax), 0:xmax] = face_mask_dilated[0:int(original_rate * ymax), 0:xmax]
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (51, 51))
+    return cv2.morphologyEx(face_mask, cv2.MORPH_OPEN, kernel, iterations=5)
 
-if STYLE == 'anime':
-    dilation_rate = (0.2, 0.15)
-    face_changer = AnimeFaceChanger()
-elif STYLE == 'dual':
-    dilation_rate = (0.4, 0.4)
-    face_changer = DualStyleGan2FaceChanger(download=False)
+def get_human_masks(img, predictor):
+    outputs = predictor(img)
 
-#Generate democracy
-cap = cv2.VideoCapture(INPUT_VIDEO)
+    pred_classes = outputs["instances"].pred_classes.cpu().numpy()
+    masks = outputs["instances"].pred_masks.cpu()
 
-# create output folder
-os.system('mkdir save')
+    masks_out = []
+    for idx, pred_class in enumerate(pred_classes):
+        if pred_class == 0:
+            mask = masks[idx, :, :].squeeze(0).numpy().astype(np.uint8)
+            mask = mask.astype(np.uint8)
 
-cfg = get_cfg()
-# Inference should use the config with parameters that are used in training
-# cfg now already contains everything we've set previously. We changed it a little bit for inference:
+            masks_out.append(mask)
 
-
-cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
-
-cfg.DATASETS.TEST = ()
-cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
-cfg.TEST.DETECTIONS_PER_IMAGE = 1000
-cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128   # faster, and good enough for this toy dataset (default: 512)
-cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.1   # set a custom testing threshold
-
-detector = face_detection.build_detector(
-  "DSFDDetector", confidence_threshold=.5, nms_iou_threshold=.3)
-
-if cap.isOpened() == False:
-    print("Error opening video stream or file")
-
-# Read until video is completed
-# cap.set(1, 500)
-
-frame_count = 0
-while cap.isOpened():
-    # Capture frame-by-frame
-    ret, frame = cap.read()
-
-    if ret:
-
-        # Add brightness
-        # frame = cv2.add(frame, np.array([50.0]))
-        # print("INFO: Adding brightness")
-
-        frame_count += 1
-
-        # if frame_count <= 150:
-        #     continue
-
-        predictor = DefaultPredictor(cfg)
-        outputs = predictor(frame)
-
-        pred_classes = outputs["instances"].pred_classes.cpu().numpy()
-        masks = outputs["instances"].pred_masks.cpu()
-
-        img_demo = frame
-        for idx, pred_class in enumerate(pred_classes):
-            if pred_class == 0:
-                mask = masks[idx, :, :].squeeze(0).numpy().astype(np.uint8)
-                mask = mask.astype(np.uint8)
-
-                img_demo = apply_mask(img_demo, mask)
-
-                # Face detector
-                detections = detector.detect(frame[:, :, ::-1])
-                if len(detections):
-                    face_bbox = [int(value) for value in detections[0]]
-                    h, w, c = frame.shape
-                    xmin, ymin, xmax, ymax, conf = face_bbox
-                    padding = 900 * (xmax - xmin) / w
-                    xmin = max(0, int(xmin - padding))
-                    ymin = max(0, int(ymin - padding))
-                    xmax = min(w, int(xmax + padding))
-                    ymax = min(h, int(ymax + padding))
-
-                    if STYLE is not None:
-                        in_img = frame[ymin:ymax, xmin:xmax, :]
-                        # cv2.namedWindow("in_img", cv2.WINDOW_NORMAL)  # Create window with freedom of dimensions
-                        # cv2.imshow('in_img', in_img)
-                        # cv2.waitKey(1)
-                        size = (512, 512)
-                        resized_in_img = cv2.resize(in_img.copy(), size, interpolation=cv2.INTER_AREA)
-                        out_img_pil = face_changer.change_face(Image.fromarray(cv2.cvtColor(resized_in_img,
-                                                                      cv2.COLOR_BGR2RGB)))
-
-                        if out_img_pil is not None:
-                            out_img = np.array(out_img_pil)
-                            # Convert RGB to BGR
-                            out_img = out_img[:, :, ::-1].copy()
-                            out_img = cv2.resize(out_img, (xmax - xmin, ymax - ymin), interpolation=cv2.INTER_AREA)
-
-                            face_mask = mask[ymin:ymax, xmin:xmax].copy()
-
-                            # Improve face mask due to anime distortion of original sizes
-                            modified_face_mask = face_mask.copy()
-
-
-                            dilated_size = (int((ymax - ymin) * dilation_rate[0]), int((xmax - xmin) * dilation_rate[0]))
-                            face_mask_dilated = cv2.dilate(modified_face_mask.copy(),  np.ones(dilated_size), iterations=1)  # (y, x)
-                            original_rate = 0.75
-                            modified_face_mask[0:int(original_rate * ymax), 0:xmax] = face_mask_dilated[0:int(original_rate * ymax), 0:xmax]
-                            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (51, 51))
-                            modified_face_mask = cv2.morphologyEx(modified_face_mask, cv2.MORPH_OPEN, kernel, iterations=5)
-
-                            face_mask = cv2.bitwise_or(face_mask, modified_face_mask)
-
-                            masked_img = cv2.bitwise_and(out_img, out_img, mask=face_mask)
-
-                            # Segment background
-                            face_mask_inverse = 1 - face_mask
-                            image_back = cv2.bitwise_and(in_img, in_img, mask=face_mask_inverse)
-
-                            final_face_img = cv2.add(masked_img, image_back)
-
-                            img_demo[ymin:ymax, xmin:xmax, :] = \
-                                alpha_blend(img_demo[ymin:ymax, xmin:xmax, :], final_face_img)
-
-                    if mask[ymin:ymax, xmin:xmax].sum() < 200:  # Detected face with mask rcnn
-                        mask[ymin:ymax, xmin:xmax] = np.ones((ymax - ymin, xmax - xmin))
-
-
-
-        print('./save/' + str(frame_count).zfill(8) + '.jpg')
-        cv2.imwrite('./save/' + str(frame_count).zfill(8) + '.jpg', img_demo)
-
-        # cv2.namedWindow("img", cv2.WINDOW_NORMAL)        # Create window with freedom of dimensions
-        # cv2.imshow('img', img_demo)
-        # cv2.waitKey(0)
-    else:
-        # When everything done, release the video capture object
-        cap.release()
-
-# Closes all the frames
-cv2.destroyAllWindows()
-
-# Generate video
-video = cv2.VideoCapture(INPUT_VIDEO)
-
-# Find OpenCV version
-(major_ver, minor_ver, subminor_ver) = (cv2.__version__).split('.')
-
-if int(major_ver)  < 3 :
-    fps = video.get(cv2.cv.CV_CAP_PROP_FPS)
-    print("Frames per second using video.get(cv2.cv.CV_CAP_PROP_FPS): {0}".format(fps))
-else :
-    fps = video.get(cv2.CAP_PROP_FPS)
-    print("Frames per second using video.get(cv2.CAP_PROP_FPS) : {0}".format(fps))
-
-video.release()
-
+    return masks_out
 
 def make_video(outvid, images=None, fps=30, size=None,
                is_color=True, format="FMP4"):
@@ -228,12 +97,169 @@ def make_video(outvid, images=None, fps=30, size=None,
     vid.release()
     return vid
 
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-i", "--input", type=str,
+                    help="input video to process",
+                    default='/home/alejandro/fresssh/tests/encoder.mp4')
+    ap.add_argument("-s", "--style", type=str,
+                    help="'anime', 'dual0', 'dual1",
+                    default='dual0')
+    ap.add_argument("-r", "--resegment", action='store_true',
+                    help="Resegment after face change",
+                    default=True)
 
-# Directory of images to run detection on
-VIDEO_SAVE_DIR = "save"
-images = list(glob.iglob(os.path.join(VIDEO_SAVE_DIR, '*.*')))
-# Sort the images by integer index
-images = sorted(images, key=lambda x: float(os.path.split(x)[1][:-3]))
+    args = vars(ap.parse_args())
 
-outvid = "./out.mp4"
-make_video(outvid, images, fps=fps)
+    # Read video
+    INPUT_VIDEO = args['input']
+    STYLE = args['style'][:-1]
+    SUBSTYLE = args['style'][-1]
+    RESEGMENT = args['resegment']
+
+    if STYLE == 'anime':
+        dilation_rate = (0.2, 0.15)
+        face_changer = AnimeFaceChanger()
+    elif STYLE == 'dual':
+        dilation_rate = (0.4, 0.4)
+        face_changer = DualStyleGan2FaceChanger(download=True, style=int(SUBSTYLE))
+
+    #Generate democracy
+    cap = cv2.VideoCapture(INPUT_VIDEO)
+
+    # create output folder
+    os.system('mkdir save')
+
+    cfg = get_cfg()
+    # Inference should use the config with parameters that are used in training
+    # cfg now already contains everything we've set previously. We changed it a little bit for inference:
+
+
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
+
+    cfg.DATASETS.TEST = ()
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
+    cfg.TEST.DETECTIONS_PER_IMAGE = 1000
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128   # faster, and good enough for this toy dataset (default: 512)
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.1   # set a custom testing threshold
+
+    detector = face_detection.build_detector(
+      "DSFDDetector", confidence_threshold=.5, nms_iou_threshold=.3)
+
+    if cap.isOpened() == False:
+        print("Error opening video stream or file")
+
+    # Read until video is completed
+    # cap.set(1, 500)
+
+    frame_count = 0
+    while cap.isOpened():
+        # Capture frame-by-frame
+        ret, frame = cap.read()
+
+        if ret:
+
+            # Add brightness
+            # frame = cv2.add(frame, np.array([50.0]))
+            # print("INFO: Adding brightness")
+
+            frame_count += 1
+
+            # if frame_count <= 150:
+            #     continue
+
+            # Human segmentation
+            predictor = DefaultPredictor(cfg)
+            masks_out = get_human_masks(frame, predictor)
+
+            img_demo = frame
+            for mask in masks_out:
+                img_demo = apply_mask(img_demo, mask)
+
+                # Face detector
+                detections = detector.detect(frame[:, :, ::-1])
+                if len(detections):
+                    face_bbox = [int(value) for value in detections[0]]
+                    h, w, c = frame.shape
+                    xmin, ymin, xmax, ymax, conf = face_bbox
+                    padding = 900 * (xmax - xmin) / w
+                    xmin = max(0, int(xmin - padding))
+                    ymin = max(0, int(ymin - padding))
+                    xmax = min(w, int(xmax + padding))
+                    ymax = min(h, int(ymax + padding))
+
+                    if STYLE is not None:
+                        in_img = frame[ymin:ymax, xmin:xmax, :]
+                        size = (512, 512)
+                        resized_in_img = cv2.resize(in_img.copy(), size, interpolation=cv2.INTER_AREA)
+                        out_img_pil = face_changer.change_face(Image.fromarray(cv2.cvtColor(resized_in_img,
+                                                                      cv2.COLOR_BGR2RGB)))
+
+                        if out_img_pil is not None:
+                            out_img = np.array(out_img_pil)
+                            # Convert RGB to BGR
+                            out_img = out_img[:, :, ::-1].copy()
+                            out_img = cv2.resize(out_img, (xmax - xmin, ymax - ymin), interpolation=cv2.INTER_AREA)
+
+                            face_mask = mask[ymin:ymax, xmin:xmax].copy()
+
+                            # Improve face mask due to anime distortion of original sizes
+                            modified_face_mask = face_mask.copy()
+
+                            if RESEGMENT:
+                                masks_out = get_human_masks(out_img, predictor)
+                                modified_face_mask = masks_out[0] if len(masks_out) else dilate_face_mask(modified_face_mask, dilation_rate)
+
+                            face_mask = cv2.bitwise_or(face_mask, modified_face_mask)
+
+                            masked_img = cv2.bitwise_and(out_img, out_img, mask=face_mask)
+
+                            # Segment background
+                            face_mask_inverse = 1 - face_mask
+                            image_back = cv2.bitwise_and(in_img, in_img, mask=face_mask_inverse)
+
+                            final_face_img = cv2.add(masked_img, image_back)
+
+                            img_demo[ymin:ymax, xmin:xmax, :] = \
+                                alpha_blend(img_demo[ymin:ymax, xmin:xmax, :], final_face_img)
+
+                    if mask[ymin:ymax, xmin:xmax].sum() < 200:  # Detected face with mask rcnn
+                        mask[ymin:ymax, xmin:xmax] = np.ones((ymax - ymin, xmax - xmin))
+
+
+            print('./save/' + str(frame_count).zfill(8) + '.jpg')
+            cv2.imwrite('./save/' + str(frame_count).zfill(8) + '.jpg', img_demo)
+
+            # cv2.namedWindow("img", cv2.WINDOW_NORMAL)        # Create window with freedom of dimensions
+            # cv2.imshow('img', img_demo)
+            # cv2.waitKey(0)
+        else:
+            # When everything done, release the video capture object
+            cap.release()
+
+    # Closes all the frames
+    cv2.destroyAllWindows()
+
+    # Generate video
+    video = cv2.VideoCapture(INPUT_VIDEO)
+
+    # Find OpenCV version
+    (major_ver, minor_ver, subminor_ver) = (cv2.__version__).split('.')
+
+    if int(major_ver)  < 3 :
+        fps = video.get(cv2.cv.CV_CAP_PROP_FPS)
+        print("Frames per second using video.get(cv2.cv.CV_CAP_PROP_FPS): {0}".format(fps))
+    else :
+        fps = video.get(cv2.CAP_PROP_FPS)
+        print("Frames per second using video.get(cv2.CAP_PROP_FPS) : {0}".format(fps))
+
+    video.release()
+
+    # Directory of images to run detection on
+    VIDEO_SAVE_DIR = "save"
+    images = list(glob.iglob(os.path.join(VIDEO_SAVE_DIR, '*.*')))
+    # Sort the images by integer index
+    images = sorted(images, key=lambda x: float(os.path.split(x)[1][:-3]))
+
+    outvid = f"./out_{args['style']}.mp4"
+    make_video(outvid, images, fps=fps)
