@@ -5,4 +5,5 @@
 *.pkl
 *.pth
 checkpoint
-__pycache__
+__pycache_
+save
