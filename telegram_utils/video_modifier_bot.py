@@ -7,14 +7,17 @@ from telegram.ext.filters import Filters
 import os
 from video_utils.generate_video_democracy import generate_video_style
 from video_utils.backgroundremover.backgroundremover.cmd.api import process_video
+from youtube_utils.search_and_download_yt import download_from_youtube
 
 BOT_API_KEY = os.getenv('BOT_API_KEY', default=None)
 VIDEO_TYPE = 'fresssh'
 VIDEO_SUBTYPE = '0'
 BLOCKED_EXECUTION = False
+AVAILABLE_COMMANDS = ['anime', 'dual', 'fresssh', 'green', 'youtube']
 
 updater = Updater(BOT_API_KEY,
-                  use_context=True)
+                  use_context=True,
+                  base_url='http://0.0.0.0:8081/bot')
 
 def start(update: Update, context: CallbackContext):
     update.message.reply_text(
@@ -22,7 +25,7 @@ def start(update: Update, context: CallbackContext):
 
 def unknown(update: Update, context: CallbackContext):
     update.message.reply_text(
-        "Sorry '%s' is not a valid command" % update.message.text)
+        f"Sorry '{update.message.text}' is not a valid command ({AVAILABLE_COMMANDS})")
 
 def video_type(update: Update, context: CallbackContext):
     update.message.reply_text(
@@ -39,6 +42,11 @@ def anime_type(update: Update, context: CallbackContext):
 def green_type(update: Update, context: CallbackContext):
     global VIDEO_TYPE
     VIDEO_TYPE = 'green'
+
+def youtube_type(update: Update, context: CallbackContext):
+    update.message.reply_text(f"Downloading video: {context.args[0]}")
+    video_output = download_from_youtube(context.args[0])
+    update.message.reply_document(open(video_output, 'rb'), filename='youtube.mp4')
 
 def dual0_type(update: Update, context: CallbackContext):
     global VIDEO_TYPE, VIDEO_SUBTYPE
@@ -68,16 +76,25 @@ def downloader_video(update, context):
         # writing to a custom file
         if not os.path.isdir('video'):
             os.system('mkdir video')
-        with open("video/video.mp4", 'wb') as f:
-            context.bot.get_file(update.message.video).download(out=f)
+        try:
+            with open("video/video.mp4", 'wb') as f:
+                context.bot.get_file(update.message.video).download(out=f)
+        except:
+            with open("video/video.mp4", 'wb') as f:
+                context.bot.get_file(update.message.document).download(out=f)
 
         update.message.reply_text(
             f"Processing video with '{VIDEO_TYPE}' style...")
 
-        if VIDEO_TYPE != 'green':
+        if VIDEO_TYPE == 'green':
+            video_output = process_video('video/video.mp4', type='greenvideo')
+        elif VIDEO_TYPE in AVAILABLE_COMMANDS:
             video_output = generate_video_style('video/video.mp4', VIDEO_TYPE, VIDEO_SUBTYPE)
         else:
-            video_output = process_video('video/video.mp4', type='greenvideo')
+            update.message.reply_text(
+                f"Sorry ma friend, only available commands are {AVAILABLE_COMMANDS}")
+
+
         print(video_output)
 
         update.message.reply_text(
@@ -90,11 +107,13 @@ def downloader_video(update, context):
         update.message.reply_text(
             f"Sorry, there's an ongoing work here, wait til it finishes")
 
+
 updater.dispatcher.add_handler(CommandHandler('anime', anime_type))
 updater.dispatcher.add_handler(CommandHandler('dual0', dual0_type))
 updater.dispatcher.add_handler(CommandHandler('fresssh', fresssh_type))
 updater.dispatcher.add_handler(CommandHandler('green', green_type))
-updater.dispatcher.add_handler(MessageHandler(Filters.document, downloader))
+updater.dispatcher.add_handler(CommandHandler('youtube', youtube_type, pass_args=True))
+updater.dispatcher.add_handler(MessageHandler(Filters.document, downloader_video))
 updater.dispatcher.add_handler(MessageHandler(Filters.video, downloader_video))
 
 # updater.dispatcher.add_handler(MessageHandler(Filters.text, video_type))

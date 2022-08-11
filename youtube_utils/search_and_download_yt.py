@@ -26,3 +26,7 @@ os.system('mv "' + video_path + '" ' + video_root.replace(video_path.split('/')[
 # Segment length randomized between 2-10 sec
 # center position: random between 1920x10080 margins
 # Max. number of videos per frame 5
+
+def download_from_youtube(url):
+    youtube = pytube.YouTube(url)
+    return youtube.streams.filter(res="720p").first().download('/tmp')
