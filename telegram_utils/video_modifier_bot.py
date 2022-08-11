@@ -6,6 +6,7 @@ from telegram.ext.messagehandler import MessageHandler
 from telegram.ext.filters import Filters
 import os
 from video_utils.generate_video_democracy import generate_video_style
+from video_utils.backgroundremover.backgroundremover.cmd.api import process_video
 
 BOT_API_KEY = os.getenv('BOT_API_KEY', default=None)
 VIDEO_TYPE = 'fresssh'
@@ -34,6 +35,10 @@ def fresssh_type(update: Update, context: CallbackContext):
 def anime_type(update: Update, context: CallbackContext):
     global VIDEO_TYPE
     VIDEO_TYPE = 'anime'
+
+def green_type(update: Update, context: CallbackContext):
+    global VIDEO_TYPE
+    VIDEO_TYPE = 'green'
 
 def dual0_type(update: Update, context: CallbackContext):
     global VIDEO_TYPE, VIDEO_SUBTYPE
@@ -69,7 +74,10 @@ def downloader_video(update, context):
         update.message.reply_text(
             f"Processing video with '{VIDEO_TYPE}' style...")
 
-        video_output = generate_video_style('video/video.mp4', VIDEO_TYPE, VIDEO_SUBTYPE)
+        if VIDEO_TYPE != 'green':
+            video_output = generate_video_style('video/video.mp4', VIDEO_TYPE, VIDEO_SUBTYPE)
+        else:
+            video_output = process_video('video/video.mp4', type='greenvideo')
         print(video_output)
 
         update.message.reply_text(
@@ -85,10 +93,11 @@ def downloader_video(update, context):
 updater.dispatcher.add_handler(CommandHandler('anime', anime_type))
 updater.dispatcher.add_handler(CommandHandler('dual0', dual0_type))
 updater.dispatcher.add_handler(CommandHandler('fresssh', fresssh_type))
+updater.dispatcher.add_handler(CommandHandler('green', green_type))
 updater.dispatcher.add_handler(MessageHandler(Filters.document, downloader))
 updater.dispatcher.add_handler(MessageHandler(Filters.video, downloader_video))
 
-updater.dispatcher.add_handler(MessageHandler(Filters.text, video_type))
+# updater.dispatcher.add_handler(MessageHandler(Filters.text, video_type))
 updater.dispatcher.add_handler(MessageHandler(
     # Filters out unknown commands
     Filters.command, unknown))
