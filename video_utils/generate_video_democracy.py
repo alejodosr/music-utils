@@ -23,6 +23,7 @@ from PIL import Image
 from video_utils.person_changers.bansky_person_handlers import apply_mask
 from video_utils.face_changers.anime_face_changer import AnimeFaceChanger
 from video_utils.face_changers.dual_stylegan_face_changer import DualStyleGan2FaceChanger
+from video_utils.backgroundremover.backgroundremover.cmd.api import process_video
 
 
 def alpha_blend(img1, img2, mask_thickness=(0.14, 0)):
@@ -98,7 +99,13 @@ def make_video(outvid, images=None, fps=30, size=None,
     return vid
 
 
-def generate_video_style(input_video, style, substyle, resegment=True, audio=True):
+def generate_video_style(input_video,
+                         style,
+                         substyle,
+                         resegment=True,
+                         audio=True,
+                         model='unet'   # unet, detectron
+                         ):
     if os.path.isdir('save'):
         os.system(f'rm -rf ./save')
 
@@ -114,22 +121,38 @@ def generate_video_style(input_video, style, substyle, resegment=True, audio=Tru
     else:
         raise Exception("Style not defined")
 
-    # Generate democracy
-    cap = cv2.VideoCapture(input_video)
     # create output folder
     os.system('mkdir save')
-    cfg = get_cfg()
-    # Inference should use the config with parameters that are used in training
-    # cfg now already contains everything we've set previously. We changed it a little bit for inference:
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
-    cfg.DATASETS.TEST = ()
-    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
-        "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
-    cfg.TEST.DETECTIONS_PER_IMAGE = 1000
-    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128  # faster, and good enough for this toy dataset (default: 512)
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.1  # set a custom testing threshold
+
+    if model == 'detectron':
+        cfg = get_cfg()
+        # Inference should use the config with parameters that are used in training
+        # cfg now already contains everything we've set previously. We changed it a little bit for inference:
+        cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
+        cfg.DATASETS.TEST = ()
+        cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
+            "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
+        cfg.TEST.DETECTIONS_PER_IMAGE = 1000
+        cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128  # faster, and good enough for this toy dataset (default: 512)
+        cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.1  # set a custom testing threshold
+
+    elif model == 'unet':
+        mask_video = process_video(input_video, type='mattekey')
+        cap_mask = cv2.VideoCapture(mask_video)
+        mask_frames = []
+        while cap_mask.isOpened():
+            ret, frame = cap_mask.read()
+            if ret:
+                mask_frames.append(frame)
+            else:
+                break
+
     detector = face_detection.build_detector(
         "DSFDDetector", confidence_threshold=.5, nms_iou_threshold=.3)
+
+    # Generate fresssh
+    cap = cv2.VideoCapture(input_video)
+
     if cap.isOpened() == False:
         print("Error opening video stream or file")
     # Read until video is completed
@@ -150,12 +173,22 @@ def generate_video_style(input_video, style, substyle, resegment=True, audio=Tru
             # if frame_count <= 150:
             #     continue
 
-            # Human segmentation
-            predictor = DefaultPredictor(cfg)
-            masks_out = get_human_masks(frame, predictor)
+            if model == 'detectron':
+                # Human segmentation
+                predictor = DefaultPredictor(cfg)
+                masks_out = get_human_masks(frame, predictor)
+            elif model == 'unet':
+                masks_out = [mask_frames[frame_count - 1]]
 
             img_demo = frame
             for mask in masks_out:
+                if mask.shape[:2] != img_demo.shape[:2]:
+                    mask = cv2.resize(mask, (img_demo.shape[1], img_demo.shape[0]), interpolation=cv2.INTER_AREA)
+                    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                    (T, mask) = cv2.threshold(mask, 127, 255,
+                                                   cv2.THRESH_BINARY)
+                    mask = cv2.normalize(mask, dst=None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+
                 img_demo = apply_mask(img_demo, mask)
 
                 # Face detector
@@ -188,7 +221,7 @@ def generate_video_style(input_video, style, substyle, resegment=True, audio=Tru
                             # Improve face mask due to anime distortion of original sizes
                             modified_face_mask = face_mask.copy()
 
-                            if resegment:
+                            if resegment and model != 'unet':
                                 masks_out = get_human_masks(out_img, predictor)
                                 modified_face_mask = masks_out[0] if len(masks_out) else dilate_face_mask(
                                     modified_face_mask, dilation_rate)
@@ -255,10 +288,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", type=str,
                     help="input video to process",
-                    default='/home/alejandro/Downloads/IMG_2340.mov')
+                    default='/home/alejandro/fresssh/releases/20220809_archipielago/fraga_short.mp4')
     ap.add_argument("-s", "--style", type=str,
                     help="'anime', 'dual0', 'dual1",
-                    default='anime')
+                    default='fresssh')
     ap.add_argument("-r", "--resegment", action='store_true',
                     help="Resegment after face change",
                     default=True)

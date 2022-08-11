@@ -4,6 +4,7 @@
 *.mov
 *.pkl
 *.pth
+*.pyc
 checkpoint
-__pycache_
+__pycache__*
 save
