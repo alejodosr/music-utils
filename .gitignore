@@ -5,6 +5,6 @@
 *.pkl
 *.pth
 *.pyc
-checkpoint
+checkpoint*
 __pycache__*
 save

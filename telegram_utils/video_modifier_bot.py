@@ -1,3 +1,6 @@
+import glob
+import random
+
 from telegram.ext.updater import Updater
 from telegram.update import Update
 from telegram.ext.callbackcontext import CallbackContext
@@ -8,12 +11,14 @@ import os
 from video_utils.generate_video_democracy import generate_video_style
 from video_utils.backgroundremover.backgroundremover.cmd.api import process_video
 from youtube_utils.search_and_download_yt import download_from_youtube
+from text_to_img_utils.prompt_stable_difussion import get_samples_from_stable_diffusion
+
 
 BOT_API_KEY = os.getenv('BOT_API_KEY', default=None)
 VIDEO_TYPE = 'fresssh'
 VIDEO_SUBTYPE = '0'
 BLOCKED_EXECUTION = False
-AVAILABLE_COMMANDS = ['anime', 'dual', 'fresssh', 'green', 'youtube']
+AVAILABLE_COMMANDS = ['anime', 'dual', 'fresssh', 'green', 'youtube', 'diffusion']
 
 updater = Updater(BOT_API_KEY,
                   use_context=True,
@@ -47,6 +52,32 @@ def youtube_type(update: Update, context: CallbackContext):
     update.message.reply_text(f"Downloading video: {context.args[0]}")
     video_output = download_from_youtube(context.args[0])
     update.message.reply_document(open(video_output, 'rb'), filename='youtube.mp4')
+
+def diffusion_type(update: Update, context: CallbackContext):
+
+
+    if len(context.args):
+        idcs = []
+        for idx, arg in enumerate(context.args):
+            if '/' in arg:
+                idcs.append(idx)
+                if len(idcs) == 2:
+                    break
+
+        prompt = ' '.join(context.args[idcs[0]:idcs[1]+1]).replace('/', '')
+        seed = random.randint(0, 1e4)
+        outdir = '/tmp/sd_queries'
+        config_root = '/home/alejandro/py_workspace/stable-diffusion'
+        config = os.path.join(config_root, 'configs/stable-diffusion/v1-inference.yaml')
+        model = os.path.join(config_root, 'models/ldm/stable-diffusion-v1/model.ckpt')
+
+        update.message.reply_text(f"Querying Stable Diffusion with: '{prompt}' and seed ({seed})")
+        get_samples_from_stable_diffusion(prompt, seed=seed, outdir=outdir, config=config, ckpt=model)
+        for idx, filename in enumerate(glob.glob(f'{outdir}/samples/*.png')):
+            update.message.reply_document(open(filename, 'rb'), filename=f'sample{idx}.png')
+        os.system(f'rm -r {outdir}')
+    else:
+        update.message.reply_text(f"Not a valid call for diffusion")
 
 def dual0_type(update: Update, context: CallbackContext):
     global VIDEO_TYPE, VIDEO_SUBTYPE
@@ -113,6 +144,7 @@ updater.dispatcher.add_handler(CommandHandler('dual0', dual0_type))
 updater.dispatcher.add_handler(CommandHandler('fresssh', fresssh_type))
 updater.dispatcher.add_handler(CommandHandler('green', green_type))
 updater.dispatcher.add_handler(CommandHandler('youtube', youtube_type, pass_args=True))
+updater.dispatcher.add_handler(CommandHandler('diffusion', diffusion_type, pass_args=True))
 updater.dispatcher.add_handler(MessageHandler(Filters.document, downloader_video))
 updater.dispatcher.add_handler(MessageHandler(Filters.video, downloader_video))
 
