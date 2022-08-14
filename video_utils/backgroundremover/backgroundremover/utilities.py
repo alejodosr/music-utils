@@ -272,7 +272,9 @@ def greenvideo(output, file_path,
 
     cmd = f'ffmpeg -y -i {temp_file2} -filter_complex ' \
           f'"color=green,format=rgb24[c];[c][0]scale2ref[c][i];[c][i]overlay=format=auto:shortest=1,setsar=1" ' \
-          f'{output}'
+          f'-preset slow ' \
+          f'-c:a aac -b:a 128k -codec:v libx264 -pix_fmt yuv420p -b:v 2500k ' \
+          f'-minrate 1500k -maxrate 4000k -bufsize 5000k {output}'
     os.system(cmd)
 
     # process = sp.Popen(cmd, shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
