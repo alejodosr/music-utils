@@ -13,7 +13,7 @@ def apply_mask(image, mask, thr_body=95):
     l, a, b = cv2.split(lab)
 
     # -----Applying CLAHE to L-channel-------------------------------------------
-    clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(1, 1))
+    clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(5, 5))
     cl = clahe.apply(l)
     ret, only_person = cv2.threshold(cl, thr_body, 255, cv2.THRESH_BINARY)
 

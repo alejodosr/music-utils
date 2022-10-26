@@ -1,5 +1,7 @@
 import glob
 import random
+import numpy as np
+import cv2
 
 from telegram.ext.updater import Updater
 from telegram.update import Update
@@ -8,7 +10,7 @@ from telegram.ext.commandhandler import CommandHandler
 from telegram.ext.messagehandler import MessageHandler
 from telegram.ext.filters import Filters
 import os
-from video_utils.generate_video_democracy import generate_video_style
+from video_utils.generate_video_democracy import generate_video_style, generate_photo_style
 from video_utils.backgroundremover.backgroundremover.cmd.api import process_video
 from youtube_utils.search_and_download_yt import download_from_youtube
 from text_to_img_utils.prompt_stable_difussion import get_samples_from_stable_diffusion
@@ -47,6 +49,10 @@ def anime_type(update: Update, context: CallbackContext):
 def green_type(update: Update, context: CallbackContext):
     global VIDEO_TYPE
     VIDEO_TYPE = 'green'
+
+def image_type(update: Update, context: CallbackContext):
+    global VIDEO_TYPE
+    VIDEO_TYPE = 'image'
 
 def youtube_type(update: Update, context: CallbackContext):
     update.message.reply_text(f"Downloading video: {context.args[0]}")
@@ -93,6 +99,36 @@ def downloader(update, context):
     # with open("custom/file.doc", 'wb') as f:
     #     context.bot.get_file(update.message.document).download(out=f)
 
+def shutdown(update, context):
+    update.message.reply_text(
+        "Shutting down.. bye bye fresssh")
+    os.system("shutdown now -h")
+
+
+def downloader_photo(update, context):
+    if os.path.isdir('photo'):
+        os.system(f'rm -rf ./photo')
+
+    if not os.path.isdir('photo'):
+        os.system('mkdir photo')
+    try:
+        from io import BytesIO
+        photo = update.message.photo[-1].get_file()
+        img = cv2.imdecode(np.fromstring(BytesIO(photo.download_as_bytearray()).getvalue(), np.uint8), 1)
+
+        cv2.imwrite('photo/photo.jpg', img)
+    except:
+        update.message.reply_text(
+            f"I couldn't download the photo :(")
+
+    imgs_output = generate_photo_style('photo/photo.jpg')
+    print(imgs_output)
+    update.message.reply_text(
+        f"Here you are the photo \U0001F308, rock it baby!")
+    for img_output in imgs_output:
+        update.message.reply_document(open(img_output, 'rb'), filename=img_output.split(os.pathsep)[-1])
+
+
 def downloader_video(update, context):
     global BLOCKED_EXECUTION
     if not BLOCKED_EXECUTION:
@@ -107,6 +143,28 @@ def downloader_video(update, context):
         # writing to a custom file
         if not os.path.isdir('video'):
             os.system('mkdir video')
+
+        if VIDEO_TYPE == 'image':
+            if os.path.isdir('photo'):
+                os.system(f'rm -rf ./photo')
+
+            if not os.path.isdir('photo'):
+                os.system('mkdir photo')
+
+            with open("photo/photo.png", 'wb') as f:
+                context.bot.get_file(update.message.document).download(out=f)
+
+            imgs_output = generate_photo_style('photo/photo.png')
+            print(imgs_output)
+            update.message.reply_text(
+                f"Here you are the photo \U0001F308, rock it baby!")
+            for img_output  in imgs_output:
+                update.message.reply_document(open(img_output, 'rb'), filename=img_output.split(os.pathsep)[-1])
+
+            BLOCKED_EXECUTION = False
+
+            return
+
         try:
             with open("video/video.mp4", 'wb') as f:
                 context.bot.get_file(update.message.video).download(out=f)
@@ -143,10 +201,13 @@ updater.dispatcher.add_handler(CommandHandler('anime', anime_type))
 updater.dispatcher.add_handler(CommandHandler('dual0', dual0_type))
 updater.dispatcher.add_handler(CommandHandler('fresssh', fresssh_type))
 updater.dispatcher.add_handler(CommandHandler('green', green_type))
+updater.dispatcher.add_handler(CommandHandler('image', image_type))
 updater.dispatcher.add_handler(CommandHandler('youtube', youtube_type, pass_args=True))
 updater.dispatcher.add_handler(CommandHandler('diffusion', diffusion_type, pass_args=True))
+updater.dispatcher.add_handler(CommandHandler('shutdown', shutdown, pass_args=True))
 updater.dispatcher.add_handler(MessageHandler(Filters.document, downloader_video))
 updater.dispatcher.add_handler(MessageHandler(Filters.video, downloader_video))
+updater.dispatcher.add_handler(MessageHandler(Filters.photo, downloader_photo))
 
 # updater.dispatcher.add_handler(MessageHandler(Filters.text, video_type))
 updater.dispatcher.add_handler(MessageHandler(

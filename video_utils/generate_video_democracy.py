@@ -99,12 +99,59 @@ def make_video(outvid, images=None, fps=30, size=None,
     return vid
 
 
+def generate_photo_style(input_photo_path,
+                         model='detectron'  # detectron, unet
+                         ):
+
+    if model == 'detectron':
+        cfg = get_cfg()
+        # Inference should use the config with parameters that are used in training
+        # cfg now already contains everything we've set previously. We changed it a little bit for inference:
+        cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
+        cfg.DATASETS.TEST = ()
+        cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
+            "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
+        cfg.TEST.DETECTIONS_PER_IMAGE = 1000
+        cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128  # faster, and good enough for this toy dataset (default: 512)
+        cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.1  # set a custom testing threshold
+
+    if model == 'detectron':
+        # Human segmentation
+        predictor = DefaultPredictor(cfg)
+
+    frame = cv2.imread(input_photo_path)
+    masks_out = get_human_masks(frame, predictor)
+
+    imgs_out = []
+    thresholds = [40, 80, 95, 105, 125, 150, 200]
+    for thr  in thresholds:
+        img_demo = frame.copy()
+        for mask in masks_out:
+            if mask.shape[:2] != img_demo.shape[:2]:
+                mask = cv2.resize(mask, (img_demo.shape[1], img_demo.shape[0]), interpolation=cv2.INTER_AREA)
+                mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                (T, mask) = cv2.threshold(mask, 127, 255,
+                                          cv2.THRESH_BINARY)
+                mask = cv2.normalize(mask, dst=None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+
+            img_demo = apply_mask(img_demo, mask, thr_body=thr)
+
+        output_path = f'/tmp/photo_out_{thr}.jpg'
+
+        cv2.imwrite(output_path, img_demo)
+
+        imgs_out.append(output_path)
+
+    return imgs_out
+
+
+
 def generate_video_style(input_video,
                          style,
                          substyle,
                          resegment=True,
                          audio=True,
-                         model='unet'   # unet, detectron
+                         model='detectron'   # unet, detectron
                          ):
     if os.path.isdir('save'):
         os.system(f'rm -rf ./save')

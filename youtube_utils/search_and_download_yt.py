@@ -29,4 +29,9 @@ os.system('mv "' + video_path + '" ' + video_root.replace(video_path.split('/')[
 
 def download_from_youtube(url):
     youtube = pytube.YouTube(url)
-    return youtube.streams.filter(res="720p").first().download('/tmp')
+    try:
+        return youtube.streams.filter(res="720p").first().download('/tmp')
+    except:
+        return youtube.streams.filter(res="480p").first().download('/tmp')
+
+
