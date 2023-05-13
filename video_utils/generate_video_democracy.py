@@ -328,6 +328,13 @@ def generate_video_style(input_video,
                   f'-c:a aac -b:a 128k -codec:v libx264 -pix_fmt yuv420p -b:v 2500k '
                   f'-minrate 1500k -maxrate 4000k -bufsize 5000k {outvid}')
 
+
+        # Other for audio
+        # ffmpeg -i /home/alejandro/fresssh/releases/20221221_woman/video_carlos/extas_bien_v1.mov -map 0:a -c copy output-audio.mov
+        # High Quality rendering. Play with higher values of crf to increase quality vs size (lower higher quality)
+        # ffmpeg -r 29.97 -start_number 1 -i ./%08d.jpg -i ./output-audio.mov -c:v libx264 -crf 12 -preset veryslow -c:a aac estas_bien_fresssh_v1.mp4
+
+
     return os.path.abspath(outvid)
 
 
@@ -335,7 +342,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", type=str,
                     help="input video to process",
-                    default='/home/alejandro/fresssh/releases/20220809_archipielago/fraga_short.mp4')
+                    default='/home/alejandro/fresssh/releases/20221221_woman/video_carlos/extas_bien_v1.mov')
     ap.add_argument("-s", "--style", type=str,
                     help="'anime', 'dual0', 'dual1",
                     default='fresssh')
