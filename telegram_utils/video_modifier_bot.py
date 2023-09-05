@@ -12,7 +12,7 @@ from telegram.ext.filters import Filters
 import os
 from video_utils.generate_video_democracy import generate_video_style, generate_photo_style
 from video_utils.backgroundremover.backgroundremover.cmd.api import process_video
-from youtube_utils.search_and_download_yt import download_from_youtube
+# from youtube_utils.search_and_download_yt import download_from_youtube
 from text_to_img_utils.prompt_stable_difussion import get_samples_from_stable_diffusion
 
 

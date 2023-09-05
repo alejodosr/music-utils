@@ -16,8 +16,8 @@ os.system('mkdir -p ' + os.path.join(WORKING_DIR, 'images'))
 number_of_segment = 1
 html = urllib.request.urlopen("https://www.youtube.com/results?search_query=" + KEYWORDS[randrange(len(KEYWORDS))].lower())
 video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
-youtube = pytube.YouTube("https://www.youtube.com/watch?v=" + video_ids[0])
-video_path = youtube.streams.filter(res="720p").first().download(os.path.join(WORKING_DIR, 'segments'))
+youtube = pytube.YouTube("https://www.youtube.com/watch?v=" + video_ids[0], use_oauth=True, allow_oauth_cache=True)
+video_path = youtube.streams.filter(res="720p", ).first().download(os.path.join(WORKING_DIR, 'segments'))
 video_root = video_path
 os.system('mv "' + video_path + '" ' + video_root.replace(video_path.split('/')[-1], '') + 'video_' + str(number_of_segment).zfill(2) + ".mp4")
 

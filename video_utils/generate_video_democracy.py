@@ -14,6 +14,8 @@ from detectron2.engine import DefaultPredictor
 from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog, DatasetCatalog
 from detectron2.utils.visualizer import ColorMode
+from ibug.face_detection import RetinaFacePredictor
+from ibug.face_parsing import FaceParser as RTNetPredictor
 import numpy as np
 import glob
 import os
@@ -151,7 +153,8 @@ def generate_video_style(input_video,
                          substyle,
                          resegment=True,
                          audio=True,
-                         model='detectron'   # unet, detectron
+                         model='only_face',   # unet, detectron, only_face
+                         phone_quality=False
                          ):
     if os.path.isdir('save'):
         os.system(f'rm -rf ./save')
@@ -194,6 +197,12 @@ def generate_video_style(input_video,
             else:
                 break
 
+    elif model == 'only_face':
+        face_detector = RetinaFacePredictor(threshold=0.8, device='cuda:0',
+                                            model=(RetinaFacePredictor.get_model('mobilenet0.25')))
+        face_parser = RTNetPredictor(
+            device='cuda:0', ckpt=None, encoder='rtnet50', decoder='fcn', num_classes=14)
+
     detector = face_detection.build_detector(
         "DSFDDetector", confidence_threshold=.5, nms_iou_threshold=.3)
 
@@ -227,67 +236,98 @@ def generate_video_style(input_video,
             elif model == 'unet':
                 masks_out = [mask_frames[frame_count - 1]]
 
-            img_demo = frame
-            for mask in masks_out:
-                if mask.shape[:2] != img_demo.shape[:2]:
-                    mask = cv2.resize(mask, (img_demo.shape[1], img_demo.shape[0]), interpolation=cv2.INTER_AREA)
-                    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
-                    (T, mask) = cv2.threshold(mask, 127, 255,
-                                                   cv2.THRESH_BINARY)
-                    mask = cv2.normalize(mask, dst=None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            if model == 'detectron' or model == 'unet':
+                img_demo = frame
+                for mask in masks_out:
+                    if mask.shape[:2] != img_demo.shape[:2]:
+                        mask = cv2.resize(mask, (img_demo.shape[1], img_demo.shape[0]), interpolation=cv2.INTER_AREA)
+                        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                        (T, mask) = cv2.threshold(mask, 127, 255,
+                                                       cv2.THRESH_BINARY)
+                        mask = cv2.normalize(mask, dst=None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
 
-                img_demo = apply_mask(img_demo, mask)
+                    img_demo = apply_mask(img_demo, mask)
 
-                # Face detector
-                detections = detector.detect(frame[:, :, ::-1])
-                if len(detections):
-                    face_bbox = [int(value) for value in detections[0]]
-                    h, w, c = frame.shape
-                    xmin, ymin, xmax, ymax, conf = face_bbox
-                    padding = 900 * (xmax - xmin) / w
-                    xmin = max(0, int(xmin - padding))
-                    ymin = max(0, int(ymin - padding))
-                    xmax = min(w, int(xmax + padding))
-                    ymax = min(h, int(ymax + padding))
+                    # Face detector
+                    detections = detector.detect(frame[:, :, ::-1])
+                    if len(detections):
+                        face_bbox = [int(value) for value in detections[0]]
+                        h, w, c = frame.shape
+                        xmin, ymin, xmax, ymax, conf = face_bbox
+                        padding = 900 * (xmax - xmin) / w
+                        xmin = max(0, int(xmin - padding))
+                        ymin = max(0, int(ymin - padding))
+                        xmax = min(w, int(xmax + padding))
+                        ymax = min(h, int(ymax + padding))
 
-                    if style is not None and style != 'fresssh':
-                        in_img = frame[ymin:ymax, xmin:xmax, :]
-                        size = (512, 512)
-                        resized_in_img = cv2.resize(in_img.copy(), size, interpolation=cv2.INTER_AREA)
-                        out_img_pil = face_changer.change_face(Image.fromarray(cv2.cvtColor(resized_in_img,
-                                                                                            cv2.COLOR_BGR2RGB)))
+                        if style is not None and style != 'fresssh':
+                            in_img = frame[ymin:ymax, xmin:xmax, :]
+                            size = (512, 512)
+                            resized_in_img = cv2.resize(in_img.copy(), size, interpolation=cv2.INTER_AREA)
+                            out_img_pil = face_changer.change_face(Image.fromarray(cv2.cvtColor(resized_in_img,
+                                                                                                cv2.COLOR_BGR2RGB)))
 
-                        if out_img_pil is not None:
-                            out_img = np.array(out_img_pil)
-                            # Convert RGB to BGR
-                            out_img = out_img[:, :, ::-1].copy()
-                            out_img = cv2.resize(out_img, (xmax - xmin, ymax - ymin), interpolation=cv2.INTER_AREA)
+                            if out_img_pil is not None:
+                                out_img = np.array(out_img_pil)
+                                # Convert RGB to BGR
+                                out_img = out_img[:, :, ::-1].copy()
+                                out_img = cv2.resize(out_img, (xmax - xmin, ymax - ymin), interpolation=cv2.INTER_AREA)
 
-                            face_mask = mask[ymin:ymax, xmin:xmax].copy()
+                                face_mask = mask[ymin:ymax, xmin:xmax].copy()
 
-                            # Improve face mask due to anime distortion of original sizes
-                            modified_face_mask = face_mask.copy()
+                                # Improve face mask due to anime distortion of original sizes
+                                modified_face_mask = face_mask.copy()
 
-                            if resegment and model != 'unet':
-                                masks_out = get_human_masks(out_img, predictor)
-                                modified_face_mask = masks_out[0] if len(masks_out) else dilate_face_mask(
-                                    modified_face_mask, dilation_rate)
+                                if resegment and model != 'unet':
+                                    masks_out = get_human_masks(out_img, predictor)
+                                    modified_face_mask = masks_out[0] if len(masks_out) else dilate_face_mask(
+                                        modified_face_mask, dilation_rate)
 
-                            face_mask = cv2.bitwise_or(face_mask, modified_face_mask)
+                                face_mask = cv2.bitwise_or(face_mask, modified_face_mask)
 
-                            masked_img = cv2.bitwise_and(out_img, out_img, mask=face_mask)
+                                masked_img = cv2.bitwise_and(out_img, out_img, mask=face_mask)
 
-                            # Segment background
-                            face_mask_inverse = 1 - face_mask
-                            image_back = cv2.bitwise_and(in_img, in_img, mask=face_mask_inverse)
+                                # Segment background
+                                face_mask_inverse = 1 - face_mask
+                                image_back = cv2.bitwise_and(in_img, in_img, mask=face_mask_inverse)
 
-                            final_face_img = cv2.add(masked_img, image_back)
+                                final_face_img = cv2.add(masked_img, image_back)
 
-                            img_demo[ymin:ymax, xmin:xmax, :] = \
-                                alpha_blend(img_demo[ymin:ymax, xmin:xmax, :], final_face_img)
+                                img_demo[ymin:ymax, xmin:xmax, :] = \
+                                    alpha_blend(img_demo[ymin:ymax, xmin:xmax, :], final_face_img)
 
-                    if mask[ymin:ymax, xmin:xmax].sum() < 200:  # Detected face with mask rcnn
-                        mask[ymin:ymax, xmin:xmax] = np.ones((ymax - ymin, xmax - xmin))
+                        if mask[ymin:ymax, xmin:xmax].sum() < 200:  # Detected face with mask rcnn
+                            mask[ymin:ymax, xmin:xmax] = np.ones((ymax - ymin, xmax - xmin))
+            elif model == 'only_face':
+                # Workaround to avoid seg fault from frame read
+                # TODO: Fix the problem with the frame being used directly internally by the frame_parser
+                cv2.imwrite('/tmp/test_image_ale.jpg', frame)
+                img_demo = cv2.imread('/tmp/test_image_ale.jpg')
+
+                faces = face_detector(img_demo, rgb=False)
+
+                if len(faces) == 0:
+                    continue
+
+                masks = face_parser.predict_img(img_demo, faces, rgb=False)
+
+                for i, (face, mask) in enumerate(zip(faces, masks)):
+                    final_mask = (mask > 0) & (
+                            (mask == 1) |  # Skin
+                            (mask == 2) |  # Left eyebrow
+                            (mask == 3) |  # Right eyebrow
+                            (mask == 4) |  # Left eye
+                            (mask == 5) |  # Right eye
+                            (mask == 6) |  # Nose
+                            (mask == 7) |  # Upper lip
+                            (mask == 8) |  # Inner Mouth
+                            (mask == 9) |  # Lower lip
+                            (mask == 11) |  # Left ear
+                            (mask == 12)  # Right ear
+                    )
+
+                    img_demo = apply_mask(img_demo, final_mask)
+
 
             print('./save/' + str(frame_count).zfill(8) + '.jpg')
             cv2.imwrite('./save/' + str(frame_count).zfill(8) + '.jpg', img_demo)
@@ -322,11 +362,18 @@ def generate_video_style(input_video,
         # Make video with OpenCV
         make_video(outvid, images, fps=fps)
     else:
-        # Make video with audio
-        os.system(f'ffmpeg -i {input_video} -vn -acodec copy ./save/output-audio.aac')
-        os.system(f'ffmpeg -r {fps:0.2f} -start_number 1 -i ./save/%08d.jpg -i ./save/output-audio.aac -preset slow '
-                  f'-c:a aac -b:a 128k -codec:v libx264 -pix_fmt yuv420p -b:v 2500k '
-                  f'-minrate 1500k -maxrate 4000k -bufsize 5000k {outvid}')
+        if phone_quality:
+            # Make video with audio
+            # os.system(f'ffmpeg -i {input_video} -vn -acodec copy ./save/output-audio.aac')
+            os.system(f'ffmpeg -i {input_video} -map 0:a -c copy ./save/output-audio.mov')
+            os.system(f'ffmpeg -r {fps:0.2f} -start_number 1 -i ./save/%08d.jpg -i ./save/output-audio.mov -preset slow '
+                      f'-c:a aac -b:a 128k -codec:v libx264 -pix_fmt yuv420p -b:v 2500k '
+                      f'-minrate 1500k -maxrate 4000k -bufsize 5000k {outvid}')
+        else:
+            os.system(f'ffmpeg -i {input_video} -map 0:a -c copy ./save/output-audio.mov')
+            os.system(f'ffmpeg -r {fps:0.2f} -start_number 1 -i ./save/%08d.jpg -i ./save/output-audio.mov'
+                      f' -c:v libx264 -crf 8 -preset veryslow -c:a aac {outvid}')
+
 
 
         # Other for audio
@@ -342,13 +389,16 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", type=str,
                     help="input video to process",
-                    default='/home/alejandro/fresssh/releases/20221221_woman/video_carlos/extas_bien_v1.mov')
+                    default='/home/alejandro/fresssh/releases/20221221_woman/video_carlos/clip_sin_transiciones.mov')
     ap.add_argument("-s", "--style", type=str,
                     help="'anime', 'dual0', 'dual1",
                     default='fresssh')
     ap.add_argument("-r", "--resegment", action='store_true',
                     help="Resegment after face change",
                     default=True)
+    ap.add_argument("-pq", "--phone_quality", action='store_true',
+                    help="Quality of the output video, for phone or for video editing",
+                    default=False)
 
     args = vars(ap.parse_args())
 
@@ -357,5 +407,6 @@ if __name__ == "__main__":
     style = args['style'][:-1] if 'dual' in args['style'] else args['style']
     substyle = args['style'][-1]
     resegment = args['resegment']
+    phone_quality = args['phone_quality']
 
-    generate_video_style(input_video, style, substyle, resegment)
+    generate_video_style(input_video, style, substyle, resegment, phone_quality=phone_quality)
