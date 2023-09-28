@@ -306,27 +306,25 @@ def generate_video_style(input_video,
 
                 faces = face_detector(img_demo, rgb=False)
 
-                if len(faces) == 0:
-                    continue
+                if len(faces) > 0:
+                    masks = face_parser.predict_img(img_demo, faces, rgb=False)
 
-                masks = face_parser.predict_img(img_demo, faces, rgb=False)
+                    for i, (face, mask) in enumerate(zip(faces, masks)):
+                        final_mask = (mask > 0) & (
+                                (mask == 1) |  # Skin
+                                (mask == 2) |  # Left eyebrow
+                                (mask == 3) |  # Right eyebrow
+                                (mask == 4) |  # Left eye
+                                (mask == 5) |  # Right eye
+                                (mask == 6) |  # Nose
+                                (mask == 7) |  # Upper lip
+                                (mask == 8) |  # Inner Mouth
+                                (mask == 9) |  # Lower lip
+                                (mask == 11) |  # Left ear
+                                (mask == 12)  # Right ear
+                        )
 
-                for i, (face, mask) in enumerate(zip(faces, masks)):
-                    final_mask = (mask > 0) & (
-                            (mask == 1) |  # Skin
-                            (mask == 2) |  # Left eyebrow
-                            (mask == 3) |  # Right eyebrow
-                            (mask == 4) |  # Left eye
-                            (mask == 5) |  # Right eye
-                            (mask == 6) |  # Nose
-                            (mask == 7) |  # Upper lip
-                            (mask == 8) |  # Inner Mouth
-                            (mask == 9) |  # Lower lip
-                            (mask == 11) |  # Left ear
-                            (mask == 12)  # Right ear
-                    )
-
-                    img_demo = apply_mask(img_demo, final_mask)
+                        img_demo = apply_mask(img_demo, final_mask, alpha=0.5)
 
 
             print('./save/' + str(frame_count).zfill(8) + '.jpg')
