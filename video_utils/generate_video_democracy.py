@@ -136,7 +136,7 @@ def generate_photo_style(input_photo_path,
                                           cv2.THRESH_BINARY)
                 mask = cv2.normalize(mask, dst=None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
 
-            img_demo = apply_mask(img_demo, mask, thr_body=thr)
+            img_demo = apply_mask(img_demo, mask, thr_body=thr, alpha=0.0)
 
         output_path = f'/tmp/photo_out_{thr}.jpg'
 
@@ -153,7 +153,7 @@ def generate_video_style(input_video,
                          substyle,
                          resegment=True,
                          audio=True,
-                         model='only_face',   # unet, detectron, only_face
+                         model='detectron',   # unet, detectron, only_face
                          phone_quality=False
                          ):
     if os.path.isdir('save'):
@@ -246,7 +246,7 @@ def generate_video_style(input_video,
                                                        cv2.THRESH_BINARY)
                         mask = cv2.normalize(mask, dst=None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
 
-                    img_demo = apply_mask(img_demo, mask)
+                    img_demo = apply_mask(img_demo, mask, alpha=0.0)
 
                     # Face detector
                     detections = detector.detect(frame[:, :, ::-1])
@@ -298,6 +298,7 @@ def generate_video_style(input_video,
 
                         if mask[ymin:ymax, xmin:xmax].sum() < 200:  # Detected face with mask rcnn
                             mask[ymin:ymax, xmin:xmax] = np.ones((ymax - ymin, xmax - xmin))
+
             elif model == 'only_face':
                 # Workaround to avoid seg fault from frame read
                 # TODO: Fix the problem with the frame being used directly internally by the frame_parser
